@@ -1,0 +1,148 @@
+####Processs sequences with Qiime and taxa classification with classifiers####
+##example script: https://github.com/julianzaugg/Example_qiime2/blob/main/example_qiime2.sh ##
+
+##connect to Eddie, load Qiime and change to working directory
+qlogin -l h_vmem=16G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load roslin/mamba/1.0
+mamba activate qiime2-2023.7
+
+cd /exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/
+
+##create demux files for each marker directory and visualize stats
+directories=(16S 18S trnl)
+for i in "${directories[@]}"
+do
+	cd $i
+
+	qiime tools import \
+		--type 'SampleData[PairedEndSequencesWithQuality]' \
+		--input-path manifest_file.txt \
+		--input-format PairedEndFastqManifestPhred33V2 \
+		--output-path demux.qza
+
+	qiime demux summarize \
+		--i-data demux.qza \
+		--o-visualization demux.qzv
+
+cd ..
+done
+
+##process each marker separately without a loop for now
+
+
+####### 16S BACTERIA #########
+
+primer_forward='GTGCCAGCMGCCGCGGTAA'
+primer_reverse='GGACTACHVGGGTWTCTAAT'
+
+trim_f=0  # choose length of primers!
+trim_r=0 
+len_f=200
+len_r=140
+
+save_dir=${len_f}_${len_r}
+
+sampling_depth=10000 #tried 6000 and 10000
+sampling_depth_cf=6000
+
+classifier=/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/prok/provided_by_qiime/silva-138-99-515-806-nb-classifier.qza
+
+
+####### 18S EUKARYOTES #########
+#follow the same steps as for bacteria but basically change the primers of cutadapt command 
+#variables
+primer_forward='GTACACACCGCCCGTC'
+primer_reverse='CCTTCYGCAGGTTCACCTAC'
+
+trim_f=0  # choose length of primers!
+trim_r=0 
+len_f=180
+len_r=140
+
+save_dir=${len_f}_${len_r}
+
+sampling_depth=285
+sampling_depth_cf=24600
+
+classifier=/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/silva_qiime/18S_V9_SILVA_classifier_010923.qza #SILVA one
+
+
+####### TRNL (plants) #########
+
+primer_forward='CGAAATCGGTAGACGCTACG'
+primer_reverse='CCATTGAGTCTCTGCACCTATC'
+
+trim_f=0  # choose length of primers!
+trim_r=0 
+len_f=140
+len_r=120
+
+save_dir=${len_f}_${len_r}
+
+sampling_depth=285
+sampling_depth_cf=1000
+
+classifier=/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/plant/ncbi_trnl/final_filesforqiime/classifier_160523/trnl-NCBI-classifier-160523.qza
+
+
+##### RUN THE QIIME PIPELINE WITH SPECIFIC PARAMETERS CHANGING MANUALLY DEPENDING ON MARKER ####
+
+cd 16S #change to 18S or trnl depending on what processing 
+
+qiime cutadapt trim-paired \
+	--i-demultiplexed-sequences demux.qza \
+	--p-front-f $primer_forward \
+	--p-front-r $primer_reverse \
+	--p-match-adapter-wildcards \
+	--verbose \
+	--o-trimmed-sequences demux_trimmed.qza
+
+qiime demux summarize \
+  --i-data demux_trimmed.qza \
+  --o-visualization demux_trimmed.qzv
+
+
+qiime dada2 denoise-paired \
+	--i-demultiplexed-seqs demux_trimmed.qza \
+	--p-trim-left-f  $trim_f \
+	--p-trim-left-r  $trim_r \
+	--p-trunc-len-f $len_f \
+	--p-trunc-len-r $len_r \
+	--p-n-threads 0 \
+	--o-representative-sequences rep-seqs-dada2.qza \
+	--o-table table-dada2.qza \
+	--o-denoising-stats stats-dada2.qza \
+	--verbose
+
+mkdir $save_dir
+mv *dada2.qza $save_dir
+cd $save_dir
+
+qiime metadata tabulate \
+  --m-input-file stats-dada2.qza \
+  --o-visualization stats-dada2.qzv
+
+qiime feature-table summarize \
+  --i-table table-dada2.qza \
+  --o-visualization table-dada2.qzv \
+  --m-sample-metadata-file ../../metadata_bvsh.txt
+
+
+### For 18S, besides SIlVA, also annotate with PR2
+
+classifier_PR2=/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2-full-seqs-classifier-070923.qza #full sequences used to build the classifier
+
+qiime feature-classifier classify-sklearn \
+  --i-classifier $classifier_PR2 \
+  --i-reads rep-seqs-dada2.qza \
+  --o-classification taxonomy-dada2_PR2.qza
+
+
+
+
+
+

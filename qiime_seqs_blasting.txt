@@ -1,0 +1,64 @@
+######Analyses sequencing June 2023#########
+#### BLASTING 18S AND TRNL SEQUENCES AGAINST PR2 AND TRNL DBS ####
+
+
+##connect to Eddie, load Qiime and change to working directory
+qlogin -l h_vmem=16G 
+
+source /exports/applications/support/set_qlogin_environment.sh
+export TMPDIR="/exports/eddie/scratch/cperezm"
+
+module load mamba
+mamba activate qiime2-amplicon-2024.2
+
+
+##### do for all fasta sequences, select da-ASVs later in r ########
+
+initial_directory="/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/data_analyses/march_2024_june_2023/dada2/qiime_blast_all"
+
+cd $initial_directory
+
+tablets=("all")
+
+
+#other variables needed
+
+directories=("18S_blast" "trnl_blast")
+marker=("18S" "trnl")
+
+db_for_blast=("/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/all_eukaryotes/pr2/18S_PR2_ref-seqs.qza" "/exports/cmvm/eddie/eb/groups/ogden_grp/carla/sequencing_data/databases/plant/ncbi_trnl/final_filesforqiime/trnl-NCBI-otus_filt.qza")
+db_name=("PR2" "NCBItrnl")
+
+maxmatch=(194141 225456) #I wrote the maximum number of hits per database so that it includes all hits above the p_ident and cover thresholds
+per_ident=0.90  #input the percentage identity values for the blasting. Until I have a better notion of what percentage is better, I leave these parameters. i can always restring a threshold later in R analyses
+query_cover=0.90 #input the query coverage value for the blasting
+
+
+#### loop for blasting ###### 
+
+for ((i=0; i<${#directories[@]}; i++)) 
+do
+	cd ${directories[i]}
+	pwd
+	
+	for ((j=0; j<${#tablets[@]}; j++)) do
+	
+	echo ${marker[i]}_${tablets[j]}_${db_name[i]} ### to control that the inputs are the desired ones -> marker 18S has to blast against PR2
+	
+	qiime tools import \
+	--input-path fasta_${marker[i]}_${tablets[j]}.fa \
+	--output-path fasta_${marker[i]}_${tablets[j]}.qza \
+	--type 'FeatureData[Sequence]'
+	
+	qiime feature-classifier blast \--i-query fasta_${marker[i]}_${tablets[j]}.qza \--i-reference-reads ${db_for_blast[i]} \--p-maxaccepts ${maxmatch[i]} \--p-perc-identity $per_ident \--p-query-cov $query_cover \--o-search-results blast_${marker[i]}_pe${per_ident}_qc${query_cover}_${db_name[i]}_${tablets[j]}.qza  ##used default parameters: --p-strand "both" and --p-evalue 0.001
+
+	qiime tools export \--input-path blast_${marker[i]}_pe${per_ident}_qc${query_cover}_${db_name[i]}_${tablets[j]}.qza \--output-path blast_${marker[i]}_pe${per_ident}_qc${query_cover}_${db_name[i]}_${tablets[j]}_export
+
+	done
+	
+	cd $inital_directory
+
+done
+
+
+
